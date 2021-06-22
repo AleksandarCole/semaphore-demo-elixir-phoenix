@@ -10,8 +10,8 @@ use Mix.Config
 # Junit formatter for test results
 config :junit_formatter,
   report_file: "junit.xml",
-  print_report_file: true,
-  prepend_project_name?: true
+  report_dir: "/tmp",
+  print_report_file: true
 
 config :sema,
   ecto_repos: [Sema.Repo]
