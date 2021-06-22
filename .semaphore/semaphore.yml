@@ -59,4 +59,4 @@ blocks:
       epilogue:
         always:
           commands:
-            - test-results publish tmp/junit.xml
+            - test-results publish /tmp/junit.xml
