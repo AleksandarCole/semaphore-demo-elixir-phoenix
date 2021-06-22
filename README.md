@@ -23,7 +23,7 @@ The example pipeline contains 3 blocks:
 
 ## License
 
-Copyright (c) 2019 Rendered Text
+Copyright (c) 2021 Rendered Text
 
 Distributed under the MIT License. See the file LICENSE.
 
