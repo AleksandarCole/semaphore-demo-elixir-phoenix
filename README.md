@@ -28,6 +28,7 @@ Copyright (c) 2021 Rendered Text
 Distributed under the MIT License. See the file LICENSE.
 
 test 1
+test 2
 
 
 [semaphore]: https://semaphoreci.com
