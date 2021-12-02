@@ -27,13 +27,14 @@ Copyright (c) 2021 Rendered Text
 
 Distributed under the MIT License. See the file LICENSE.
 
+test 1
+
+
 [semaphore]: https://semaphoreci.com
 [create-project]: https://docs.semaphoreci.com/article/63-your-first-project
 [mix-format]: https://hexdocs.pm/mix/master/Mix.Tasks.Format.html
 [exunit]: https://semaphoreci.com/community/tutorials/introduction-to-testing-elixir-applications-with-exunit
 [wallaby]: https://github.com/keathley/wallaby
 [credo]: https://github.com/rrrene/credo
-asdasd
 [dialyxir]: https://github.com/jeremyjh/dialyxir
-asdasd
-test 2
+
