@@ -31,3 +31,4 @@ Distributed under the MIT License. See the file LICENSE.
 [wallaby]: https://github.com/keathley/wallaby
 [credo]: https://github.com/rrrene/credo
 [dialyxir]: https://github.com/jeremyjh/dialyxir
+test
