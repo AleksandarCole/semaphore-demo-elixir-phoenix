@@ -30,6 +30,7 @@ Distributed under the MIT License. See the file LICENSE.
 test 1
 test 2
 test 3
+test 4
 
 
 [semaphore]: https://semaphoreci.com
