@@ -1,53 +1,80 @@
 version: v1.0
-name: Build & Test
+name: "\U0001F4AB Elixir CI Pipeline"
 agent:
   machine:
-    type: e1-standard-2
-    os_image: ubuntu1804
+    type: f1-standard-2
+    os_image: ubuntu2004
+  containers:
+    - name: main
+      image: 'registry.semaphoreci.com/elixir:1.15.7'
+    - name: postgres
+      image: 'registry.semaphoreci.com/postgres:17'
+fail_fast:
+  stop:
+    when: branch != 'main'
+auto_cancel:
+  running:
+    when: branch != 'main'
+  queued:
+    when: branch = 'main'
+global_job_config:
+  prologue:
+    commands:
+      - checkout
+      - cache restore
+      - mix local.hex --force
+      - mix local.rebar --force
+      - mix deps.get
 blocks:
-  - name: Set up
+  - name: "\U0001F6E0️ Setup and Cache"
+    dependencies: []
     task:
       jobs:
-        - name: Compile
+        - name: Install Dependencies
           commands:
-            - checkout
-            - bin/setup_ci_elixir
-            - sem-version elixir 1.8.1
-            - cache restore
-            - mix deps.get
-            - mix do compile
-            - MIX_ENV=test mix compile
+            - mix deps.compile
+            - mix compile
             - cache store
-  - name: Analyze code
+  - name: "\U0001F50D Code Quality"
+    dependencies:
+      - "\U0001F6E0️ Setup and Cache"
     task:
-      prologue:
-        commands:
-          - checkout
-          - bin/setup_ci_elixir
-          - sem-version elixir 1.8.1
-          - cache restore
-          - mix deps.get
       jobs:
-        - name: Credo
-          commands:
-            - mix credo -a
-        - name: Formatter
+        - name: Run Formatter and Credo
           commands:
             - mix format --check-formatted
-  - name: Tests
+            - mix credo --strict
+  - name: "\U0001F510 Security Checks"
+    dependencies:
+      - "\U0001F6E0️ Setup and Cache"
     task:
-      prologue:
-        commands:
-          - checkout
-          - bin/setup_ci_elixir
-          - sem-version elixir 1.8.1
-          - cache restore
-          - mix deps.get
       jobs:
-        - name: ex_unit
-          env_vars:
-            - name: DATABASE_URL
-              value: 'ecto://postgres:@0.0.0.0:5432/sema_test'
+        - name: Run Security Scans
           commands:
-            - sem-service start postgres
-            - mix test
+            - mix deps.audit
+            - mix sobelow
+  - name: "\U0001F4CA Dialyzer"
+    dependencies:
+      - "\U0001F6E0️ Setup and Cache"
+    task:
+      jobs:
+        - name: Type Checking
+          commands:
+            - mix dialyzer
+  - name: "\U0001F9EA Test Suite"
+    dependencies:
+      - "\U0001F6E0️ Setup and Cache"
+    task:
+      env_vars:
+        - name: MIX_ENV
+          value: test
+        - name: PGHOST
+          value: postgres
+        - name: PGUSER
+          value: postgres
+      jobs:
+        - name: "\U0001F7E2 Run Tests with Coverage"
+          parallelism: 4
+          commands:
+            - mix test.setup
+            - mix test --partitions $SEMAPHORE_JOB_COUNT --partition $SEMAPHORE_JOB_INDEX --cover
