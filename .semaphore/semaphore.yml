@@ -31,6 +31,8 @@ global_job_config:
       - mix local.hex --force
       - mix local.rebar --force
       - mix deps.get
+      - mix deps.clean --unused
+      - mix deps.compile decimal
       - mix deps.compile --force ecto
 blocks:
   - name: "\U0001F6E0️ Setup and Cache"
