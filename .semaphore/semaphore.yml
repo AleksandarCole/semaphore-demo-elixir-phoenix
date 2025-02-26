@@ -1,66 +1,85 @@
 version: v1.0
-name: Elixir Phoenix example CI pipeline on Semaphore
+name: "💫 Elixir CI Pipeline"
+
 agent:
   machine:
-    type: e1-standard-2
-    os_image: ubuntu1804
+    type: s1-kubernetes  # Define the machine type (e.g., e1-standard-2 for cost-efficiency)
+    os_image: ''  # Specify the OS image (e.g., ubuntu2004 for compatibility)
+
+  containers:
+    - name: main
+      image: 'registry.semaphoreci.com/elixir:1.15.7'  # Elixir 1.15.7 with Erlang/OTP 26
+    - name: postgres
+      image: 'registry.semaphoreci.com/postgres:17'  # PostgreSQL 17 for database operations
+
+fail_fast:
+  stop:
+    when: branch != 'main'  # Stop execution early for non-main branches to save resources
 auto_cancel:
+  running:
+    when: branch != 'main'  # Cancel running pipelines on non-main branches
   queued:
-    when: "true"
-    
+    when: branch = 'main'   # Cancel queued pipelines on the main branch
+
+global_job_config:
+  prologue:
+    commands:
+      - checkout  # Fetch the latest code from the repository
+      - cache restore  # Restore cached dependencies for faster builds
+      - mix local.hex --force  # Install Hex, the Elixir package manager
+      - mix local.rebar --force  # Install rebar3, a build tool for Erlang/Elixir
+      - mix deps.get  # Fetch project dependencies
+
 blocks:
-  - name: Set up
+  - name: "🛠️ Setup and Cache"
+    dependencies: []
     task:
       jobs:
-        - name: compile and build plts
+        - name: "Install Dependencies"
           commands:
-            - checkout
-            - bin/setup_ci_elixir
-            - sem-version elixir 1.8.1
-            - cache restore
-            - cache restore dialyzer-plt
-            - mix deps.get
-            - 'mix do compile, dialyzer --plt'
-            - MIX_ENV=test mix compile
-            - cache store
-            - cache store dialyzer-plt priv/plts/
-  - name: Analyze code
+            - mix deps.compile  # Compile dependencies to ensure compatibility
+            - mix compile  # Compile the project
+            - cache store  # Store compiled dependencies for future runs
+
+  - name: "🔍 Code Quality"
+    dependencies: ["🛠️ Setup and Cache"]
     task:
-      prologue:
-        commands:
-          - checkout
-          - bin/setup_ci_elixir
-          - sem-version elixir 1.8.1
-          - cache restore
-          - cache restore dialyzer-plt
       jobs:
-        - name: credo
+        - name: "Run Formatter and Credo"
           commands:
-            - mix credo -a
-        - name: dialyzer
-          commands:
-            - mix dialyzer --halt-exit-status --no-compile
-        - name: formatter
-          commands:
-            - mix format --check-formatted
-  - name: Run tests
+            - mix format --check-formatted  # Ensure all code is properly formatted
+            - mix credo --strict  # Perform static analysis to enforce best practices
+
+  - name: "🔐 Security Checks"
+    dependencies: ["🛠️ Setup and Cache"]
     task:
-      prologue:
-        commands:
-          - checkout
-          - bin/setup_ci_elixir
-          - sem-version elixir 1.8.1
-          - cache restore
       jobs:
-        - name: ex_unit
-          env_vars:
-            - name: DATABASE_URL
-              value: 'ecto://postgres:@0.0.0.0:5432/sema_test'
+        - name: "Run Security Scans"
           commands:
-            - sem-service start postgres
-            - mix deps.get
-            - mix test
-      epilogue:
-        always:
+            - mix deps.audit  # Audit dependencies for known vulnerabilities
+            - mix sobelow  # Run security analysis on the codebase
+
+  - name: "📊 Dialyzer"
+    dependencies: ["🛠️ Setup and Cache"]
+    task:
+      jobs:
+        - name: "Type Checking"
           commands:
-            - test-results publish /tmp/junit.xml
+            - mix dialyzer  # Perform static type checking for code correctness
+
+  - name: "🧪 Test Suite"
+    dependencies: ["🛠️ Setup and Cache"]
+    task:
+      env_vars:
+        - name: MIX_ENV
+          value: test  # Set the environment to test
+        - name: PGHOST
+          value: postgres  # PostgreSQL container name
+        - name: PGUSER
+          value: postgres  # PostgreSQL user
+      jobs:
+        - name: "🟢 Run Tests with Coverage"
+          parallelism: 4  # Run tests in parallel for faster execution
+          commands:
+            - mix test.setup  # Set up the test database
+            - mix test --partitions $SEMAPHORE_JOB_COUNT --partition $SEMAPHORE_JOB_INDEX --cover  # Run tests with partitioning and coverage reporting
