@@ -1,85 +1,99 @@
 version: v1.0
-name: "💫 Elixir CI Pipeline"
-
+name: "\U0001F4AB Elixir CI Pipeline"
 agent:
   machine:
-    type: s1-kubernetes  # Define the machine type (e.g., e1-standard-2 for cost-efficiency)
-    os_image: ''  # Specify the OS image (e.g., ubuntu2004 for compatibility)
-
+    type: s1-kubernetes
+    os_image: ''
   containers:
     - name: main
-      image: 'registry.semaphoreci.com/elixir:1.15.7'  # Elixir 1.15.7 with Erlang/OTP 26
+      image: 'elixir:1.15.7'
     - name: postgres
-      image: 'registry.semaphoreci.com/postgres:17'  # PostgreSQL 17 for database operations
-
+      image: 'postgres:17'
+      env_vars:
+        - name: POSTGRES_PASSWORD
+          value: postgres
+        - name: POSTGRES_DB
+          value: myapp_test
 fail_fast:
   stop:
-    when: branch != 'main'  # Stop execution early for non-main branches to save resources
+    when: branch != 'main'
 auto_cancel:
   running:
-    when: branch != 'main'  # Cancel running pipelines on non-main branches
+    when: branch != 'main'
   queued:
-    when: branch = 'main'   # Cancel queued pipelines on the main branch
-
+    when: branch = 'main'
 global_job_config:
   prologue:
     commands:
-      - checkout  # Fetch the latest code from the repository
-      - cache restore  # Restore cached dependencies for faster builds
-      - mix local.hex --force  # Install Hex, the Elixir package manager
-      - mix local.rebar --force  # Install rebar3, a build tool for Erlang/Elixir
-      - mix deps.get  # Fetch project dependencies
-
+      - checkout
+      - cache restore mix-deps-$(checksum mix.lock)
+      - cache restore build-$(checksum mix.lock)
+      - mix local.hex --force
+      - mix local.rebar --force
+      - mix deps.get
 blocks:
-  - name: "🛠️ Setup and Cache"
+  - name: "\U0001F6E0️ Setup and Cache"
     dependencies: []
     task:
       jobs:
-        - name: "Install Dependencies"
+        - name: Install Dependencies
           commands:
-            - mix deps.compile  # Compile dependencies to ensure compatibility
-            - mix compile  # Compile the project
-            - cache store  # Store compiled dependencies for future runs
-
-  - name: "🔍 Code Quality"
-    dependencies: ["🛠️ Setup and Cache"]
+            - mix deps.compile
+            - mix compile
+            - cache store mix-deps-$(checksum mix.lock) deps
+            - cache store build-$(checksum mix.lock) _build
+  - name: "\U0001F50D Code Quality"
+    dependencies:
+      - "\U0001F6E0️ Setup and Cache"
     task:
       jobs:
-        - name: "Run Formatter and Credo"
+        - name: Run Formatter and Credo
           commands:
-            - mix format --check-formatted  # Ensure all code is properly formatted
-            - mix credo --strict  # Perform static analysis to enforce best practices
-
-  - name: "🔐 Security Checks"
-    dependencies: ["🛠️ Setup and Cache"]
+            - mix format --check-formatted
+            - mix deps.get && mix credo --strict
+  - name: "\U0001F510 Security Checks"
+    dependencies:
+      - "\U0001F6E0️ Setup and Cache"
     task:
       jobs:
-        - name: "Run Security Scans"
+        - name: Run Security Scans
           commands:
-            - mix deps.audit  # Audit dependencies for known vulnerabilities
-            - mix sobelow  # Run security analysis on the codebase
-
-  - name: "📊 Dialyzer"
-    dependencies: ["🛠️ Setup and Cache"]
+            - mix deps.get && mix deps.audit
+            - mix deps.get && mix sobelow --config
+  - name: "\U0001F4CA Dialyzer"
+    dependencies:
+      - "\U0001F6E0️ Setup and Cache"
     task:
       jobs:
-        - name: "Type Checking"
+        - name: Type Checking
           commands:
-            - mix dialyzer  # Perform static type checking for code correctness
-
-  - name: "🧪 Test Suite"
-    dependencies: ["🛠️ Setup and Cache"]
+            - cache restore plt-cache
+            - mix dialyzer --format short
+            - cache store plt-cache priv/plts
+  - name: "\U0001F9EA Test Suite"
+    dependencies:
+      - "\U0001F6E0️ Setup and Cache"
     task:
       env_vars:
         - name: MIX_ENV
-          value: test  # Set the environment to test
+          value: test
+        - name: DATABASE_URL
+          value: 'postgres://postgres:postgres@localhost/myapp_test'
         - name: PGHOST
-          value: postgres  # PostgreSQL container name
+          value: localhost
         - name: PGUSER
-          value: postgres  # PostgreSQL user
+          value: postgres
+        - name: PGPASSWORD
+          value: postgres
       jobs:
-        - name: "🟢 Run Tests with Coverage"
-          parallelism: 4  # Run tests in parallel for faster execution
+        - name: "\U0001F7E2 Run Tests with Coverage"
+          parallelism: 4
           commands:
-            - mix test.setup  # Set up the test database
-            - mix test --partitions $SEMAPHORE_JOB_COUNT --partition $SEMAPHORE_JOB_INDEX --cover  # Run tests with partitioning and coverage reporting
+            - mix ecto.create
+            - mix ecto.migrate
+            - mix test --partitions $SEMAPHORE_JOB_COUNT --partition $SEMAPHORE_JOB_INDEX --cover
+      epilogue:
+        always:
+          commands:
+            - mix coveralls.json
+            - test-results publish coverage.json
