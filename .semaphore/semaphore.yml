@@ -6,9 +6,9 @@ agent:
     os_image: ''
   containers:
     - name: main
-      image: 'elixir:1.18'
+      image: 'registry.semaphoreci.com/elixir:1.15.7'
     - name: postgres
-      image: 'postgres:17'
+      image: 'registry.semaphoreci.com/postgres:17'
       env_vars:
         - name: POSTGRES_PASSWORD
           value: postgres
@@ -16,8 +16,6 @@ agent:
           value: postgres
         - name: POSTGRES_DB
           value: app_test
-    - name: redis
-      image: 'redis:7.0'
 fail_fast:
   stop:
     when: branch != 'main'
@@ -27,164 +25,65 @@ auto_cancel:
   queued:
     when: branch = 'main'
 global_job_config:
+  env_vars:
+    - name: AWS_DEFAULT_REGION
+      value: your_aws_region
+    - name: DOCKER_REPOSITORY_URI
+      value: your_ecr_container
   prologue:
     commands:
       - checkout
-      - mix local.hex --force
-      - mix local.rebar --force
-      - cache restore mix-deps-$(checksum mix.lock)
-      - cache restore build-$(checksum mix.lock)
-      - cache restore npm-modules-$(checksum assets/package-lock.json)
-      - cache restore plt-cache
+      - mix local.rebar --force && mix local.hex --force
+      - cache restore
       - mix deps.get
+      - cache store
 blocks:
-  - name: "\U0001F6E0️ Setup and Cache"
-    dependencies: []
+  - name: "\U0001F6E0️ Setup"
     task:
       jobs:
-        - name: "\U0001F4E6 Install Dependencies"
+        - name: Compile Code
           commands:
-            - mix deps.compile
             - mix compile
-            - cd assets && npm ci
-            - cache store mix-deps-$(checksum mix.lock) deps
-            - cache store build-$(checksum mix.lock) _build
-            - cache store npm-modules-$(checksum assets/package-lock.json) assets/node_modules
-            - mkdir -p priv/plts
-            - cache store plt-cache priv/plts
-  - name: "\U0001F3A8 Assets"
-    dependencies:
-      - "\U0001F6E0️ Setup and Cache"
+  - name: "\U0001F50D Analyze Code"
     task:
       jobs:
-        - name: "\U0001F58C️ Compile Assets"
+        - name: Run Credo
           commands:
-            - cd assets && npm run deploy
-            - mix phx.digest
-  - name: "\U0001F50D Code Quality"
-    dependencies:
-      - "\U0001F6E0️ Setup and Cache"
-    task:
-      jobs:
-        - name: ✨ Lint and Format
+            - mix credo -a
+        - name: Check Formatting
           commands:
             - mix format --check-formatted
-            - mix credo --strict
-            - cd assets && npm run lint
-  - name: "\U0001F510 Security Checks"
-    dependencies:
-      - "\U0001F6E0️ Setup and Cache"
+  - name: "\U0001F9EA Run Tests"
     task:
       jobs:
-        - name: "\U0001F6E1️ Security Scan"
+        - name: Run Tests and Generate Coverage
+          env_vars:
+            - name: DATABASE_URL
+              value: 'ecto://postgres:@postgres:5432/app_test'
+            - name: MIX_ENV
+              value: test
           commands:
-            - mix deps.audit
-            - mix sobelow --config
-            - cd assets && npm audit --production
-  - name: "\U0001F4CA Dialyzer"
-    dependencies:
-      - "\U0001F6E0️ Setup and Cache"
+            - mix coveralls.lcov
+            - cache store coverage-$SEMAPHORE_WORKFLOW_ID cover
+  - name: "\U0001F4E6 Build Docker Image"
     task:
+      prologue:
+        commands:
+          - 'echo ''For this job to work, you would need to create and attach Semaphore secret containing AWS credentials'''
+          - echo 'eval $(aws ecr get-login --no-include-email)'
       jobs:
-        - name: "\U0001F50E Type Checking"
+        - name: Build and Push Docker Image
           commands:
-            - mix dialyzer --plt
-  - name: "\U0001F9EA Test Suite"
-    dependencies:
-      - "\U0001F3A8 Assets"
-      - "\U0001F4CA Dialyzer"
-      - "\U0001F50D Code Quality"
-      - "\U0001F510 Security Checks"
-      - "\U0001F6E0️ Setup and Cache"
-    task:
-      env_vars:
-        - name: MIX_ENV
-          value: test
-        - name: DATABASE_URL
-          value: 'postgresql://postgres:postgres@postgres:5432/app_test'
-        - name: PGHOST
-          value: postgres
-        - name: PGUSER
-          value: postgres
-        - name: PGPASSWORD
-          value: postgres
-        - name: REDIS_URL
-          value: 'redis://redis:6379'
-      jobs:
-        - name: "\U0001F7E2 ExUnit Tests"
-          parallelism: 4
-          commands:
-            - mix ecto.create
-            - mix ecto.migrate
-            - mix test --cover --partitions $SEMAPHORE_JOB_COUNT --partition $SEMAPHORE_JOB_INDEX
-      epilogue:
-        always:
-          commands:
-            - mix coveralls.json || true
-            - test-results publish coverage.json || true
-  - name: "\U0001F310 Browser Tests"
-    dependencies:
-      - "\U0001F9EA Test Suite"
-    task:
-      env_vars:
-        - name: MIX_ENV
-          value: test
-        - name: DATABASE_URL
-          value: 'postgresql://postgres:postgres@postgres:5432/app_test'
-        - name: PGHOST
-          value: postgres
-        - name: PGUSER
-          value: postgres
-        - name: PGPASSWORD
-          value: postgres
-        - name: REDIS_URL
-          value: 'redis://redis:6379'
-      jobs:
-        - name: "\U0001F3AD Wallaby Tests"
-          commands:
-            - apt-get update && apt-get install -y wget gnupg ca-certificates
-            - 'wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -'
-            - 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google.list'
-            - apt-get update && apt-get install -y google-chrome-stable
-            - 'mix test --only browser:true'
-  - name: "\U0001F680 Deploy Checks"
-    dependencies:
-      - "\U0001F310 Browser Tests"
-    task:
-      env_vars:
-        - name: MIX_ENV
-          value: prod
-        - name: DATABASE_URL
-          value: 'postgresql://postgres:postgres@postgres:5432/app_test'
-        - name: PGHOST
-          value: postgres
-        - name: PGUSER
-          value: postgres
-        - name: PGPASSWORD
-          value: postgres
-      jobs:
-        - name: "\U0001F504 Migration Safety"
-          commands:
-            - mix ecto.migrations
-            - mix phx.routes
-        - name: "\U0001F4E6 Release Build"
-          commands:
-            - MIX_ENV=prod mix release --dry-run
-  - name: "\U0001F433 Docker"
-    dependencies:
-      - "\U0001F680 Deploy Checks"
-    task:
-      env_vars:
-        - name: DOCKER_USERNAME
-          value: example_only
-        - name: DOCKER_PASSWORD
-          value: EXAMPLE ONLY - use Semaphore secrets instead for sensitive data
-      jobs:
-        - name: "\U0001F4E6 Build and Push"
-          commands:
-            - echo "You should use Semaphore Secret to store credentials and other sensitive data"
-            - 'echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin'
-            - 'docker build -t "${DOCKER_USERNAME}/phoenix-app:${SEMAPHORE_GIT_SHA:0:7}" .'
-            - 'docker tag "${DOCKER_USERNAME}/phoenix-app:${SEMAPHORE_GIT_SHA:0:7}" "${DOCKER_USERNAME}/phoenix-app:latest"'
-            - 'docker push "${DOCKER_USERNAME}/phoenix-app:${SEMAPHORE_GIT_SHA:0:7}"'
-            - 'docker push "${DOCKER_USERNAME}/phoenix-app:latest"'
+            - 'docker build -t ${DOCKER_REPOSITORY_URI}:${SEMAPHORE_GIT_SHA} .'
+            - 'docker push ${DOCKER_REPOSITORY_URI}:${SEMAPHORE_GIT_SHA}'
+after_pipeline:
+  task:
+    jobs:
+      - name: Generate Test Reports
+        commands:
+          - test-results gen-pipeline-report
+      - name: Test Coverage Summary
+        commands:
+          - sudo apt-get install -y lcov
+          - cache restore coverage-$SEMAPHORE_WORKFLOW_ID
+          - lcov -l cover/lcov.info
